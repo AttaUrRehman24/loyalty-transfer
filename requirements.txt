@@ -1,0 +1,16 @@
+# Runtime dependencies, pinned so every build is identical.
+# Web framework for the REST API and the mock partners.
+fastapi==0.141.1
+# ASGI server that runs the FastAPI apps.
+uvicorn[standard]==0.54.0
+# PostgreSQL driver (psycopg 3) and its connection pool.
+psycopg[binary,pool]==3.3.6
+# Schema migrations. Alembic needs SQLAlchemy to connect; the service itself does not use it.
+alembic==1.20.0
+sqlalchemy==2.1.1
+# Request/response validation and settings parsing.
+pydantic==2.13.5
+# Redis client for the idempotency in-flight lock.
+redis==8.1.0
+# HTTP client used by partner adapters.
+httpx==0.28.1

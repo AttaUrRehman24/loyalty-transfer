@@ -1,0 +1,88 @@
+# Local stack: `docker compose up` (or `make up`) starts everything below.
+
+# Settings shared by the api and worker. Values can be overridden from a .env file.
+x-engine-env: &engine-env
+  DATABASE_URL: ${DATABASE_URL:-postgresql://loyalty:loyalty@postgres:5432/loyalty}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  PARTNER_TIMEOUT_SECONDS: ${PARTNER_TIMEOUT_SECONDS:-3}
+  PARTNER_MAX_ATTEMPTS: ${PARTNER_MAX_ATTEMPTS:-3}
+  PARTNER_BACKOFF_BASE_SECONDS: ${PARTNER_BACKOFF_BASE_SECONDS:-0.2}
+  PARTNER_BACKOFF_MAX_SECONDS: ${PARTNER_BACKOFF_MAX_SECONDS:-2}
+  IDEMPOTENCY_LOCK_TTL_SECONDS: ${IDEMPOTENCY_LOCK_TTL_SECONDS:-30}
+  OUTBOX_LEASE_SECONDS: ${OUTBOX_LEASE_SECONDS:-30}
+  RECONCILE_MIN_AGE_SECONDS: ${RECONCILE_MIN_AGE_SECONDS:-60}
+  WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS:-2}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  CARD_PARTNER_URL: ${CARD_PARTNER_URL:-http://card-partner:9001}
+  AIRLINE_PARTNER_URL: ${AIRLINE_PARTNER_URL:-http://airline-partner:9002}
+  # Used only when the test suite runs inside the api container (make test).
+  TEST_DATABASE_URL: ${TEST_DATABASE_URL:-postgresql://loyalty:loyalty@postgres:5432/loyalty_test}
+  TEST_REDIS_URL: ${TEST_REDIS_URL:-redis://redis:6379/15}
+
+# Failure-simulation flags shared by both mock partners (see .env.example).
+x-mock-env: &mock-env
+  MOCK_LATENCY_MS: ${MOCK_LATENCY_MS:-0}
+  MOCK_FAIL_5XX: ${MOCK_FAIL_5XX:-false}
+  MOCK_TIMEOUT_MODE: ${MOCK_TIMEOUT_MODE:-none}
+  MOCK_TIMEOUT_DELAY_MS: ${MOCK_TIMEOUT_DELAY_MS:-5000}
+  MOCK_DUPLICATE_RESPONSES: ${MOCK_DUPLICATE_RESPONSES:-false}
+
+services:
+  # Source of truth: ledger, transfers, rates, outbox, idempotency keys.
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: loyalty
+      POSTGRES_PASSWORD: loyalty
+      POSTGRES_DB: loyalty
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loyalty -d loyalty"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Holds only the short idempotency in-flight locks.
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Mock credit card rewards partner.
+  card-partner:
+    build: .
+    command: ["uvicorn", "mock_partners.card_program:create_app", "--factory", "--host", "0.0.0.0", "--port", "9001"]
+    environment: *mock-env
+    ports: ["9001:9001"]
+
+  # Mock airline frequent-flyer partner.
+  airline-partner:
+    build: .
+    command: ["uvicorn", "mock_partners.airline_program:create_app", "--factory", "--host", "0.0.0.0", "--port", "9002"]
+    environment: *mock-env
+    ports: ["9002:9002"]
+
+  # REST API. Applies migrations and seed data, then serves on :8000.
+  api:
+    build: .
+    command: ["sh", "-c", "alembic upgrade head && python -m scripts.seed && exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 --no-access-log"]
+    environment: *engine-env
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      card-partner: {condition: service_started}
+      airline-partner: {condition: service_started}
+
+  # Background jobs: outbox relay (crash recovery) and reconciler (UNKNOWN transfers).
+  worker:
+    build: .
+    command: ["python", "-m", "app.worker"]
+    environment: *engine-env
+    depends_on:
+      # Waits for the api container to start so migrations have been applied first.
+      api: {condition: service_started}

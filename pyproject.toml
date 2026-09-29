@@ -1,0 +1,30 @@
+# Tool configuration only. Dependencies live in requirements*.txt.
+
+[tool.ruff]
+# Match the Python version in the Dockerfile.
+target-version = "py312"
+line-length = 100
+extend-exclude = ["migrations/script.py.mako"]
+
+[tool.ruff.lint]
+# E/W style, F pyflakes, I import order, B bugbear, UP modern syntax, N naming,
+# SIM simplifications, RUF ruff-specific, S security, ANN type annotations present.
+select = ["E", "W", "F", "I", "B", "UP", "N", "SIM", "RUF", "S", "ANN"]
+# N818: domain errors read better as plain names (InsufficientPoints, not ...Error).
+# S311: `random` is only used for retry jitter, never for anything security related.
+ignore = ["N818", "S311"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests use assert by design and bind servers to localhost.
+"tests/**" = ["S101", "S104"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["app", "mock_partners", "scripts", "migrations", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# -ra: print a one-line reason for every skipped or failed test at the end.
+addopts = "-ra"

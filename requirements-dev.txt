@@ -1,0 +1,8 @@
+# Everything in requirements.txt plus test and lint tools.
+-r requirements.txt
+# Test runner.
+pytest==9.1.1
+# Linter and formatter.
+ruff==0.16.9
+# Static type checker, run with --strict.
+mypy==2.3.1

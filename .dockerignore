@@ -1,0 +1,8 @@
+# Keep local build junk and secrets out of the image.
+.venv
+**/__pycache__
+.mypy_cache
+.ruff_cache
+.pytest_cache
+.env
+.git
